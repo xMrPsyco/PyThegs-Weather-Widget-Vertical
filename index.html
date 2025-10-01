@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Weer Dashboard — Verticaal 2x3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:#166d38;
+      --text:#ffffff;
+      --card:#ffffff;
+      --card-text:#000000;
+      --border:#e5e7eb;
+      --shadow: 0 6px 20px rgba(0,0,0,.15);
+    }
+
+    html,body {
+      margin:0; padding:0;
+      background:var(--green);
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial;
+      height:100%;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .wrap {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      padding:32px 24px;
+      height:100%;
+      box-sizing:border-box;
+    }
+
+    .topbar {
+      width:100%;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:32px;
+    }
+
+    .brand img { height:64px; }
+
+    .clock {
+      font-family:'Source Sans Pro', sans-serif;
+      font-weight:700;
+      font-size:64px;
+      line-height:1;
+    }
+
+    .widget {
+      flex:1;
+      width:100%;
+      max-width: 900px;
+      display:grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-auto-rows: 1fr;
+      gap:24px;
+    }
+
+    .card {
+      background:var(--card);
+      color:var(--card-text);
+      border:1px solid var(--border);
+      border-radius:20px;
+      padding:24px;
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      min-height:220px;
+    }
+
+    .day-name {
+      font-size:26px;
+      font-weight:800;
+      margin-bottom:8px;
+      color:#16a34a;
+    }
+
+    .icon {
+      width:96px; height:96px;
+      margin:10px 0;
+    }
+
+    .temps {
+      font-size:24px; font-weight:700;
+      display:flex; gap:12px;
+    }
+    .temp-min { color:#6b7280; font-weight:600; }
+
+    .desc { margin-top:6px; font-size:18px; color:#6b7280; text-align:center; }
+
+    .error {
+      grid-column: span 2;
+      background:#fff7ed; border:1px solid #fed7aa; color:#9a3412;
+      padding:12px; border-radius:12px; font-size:18px;
+      text-align:center;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand"><img src="Golfclub-Landgoed-Nieuwkerk-logo-Wit.svg" alt="Logo"></div>
+      <div class="clock" id="clock">--:--</div>
+    </div>
+
+    <div class="widget" id="content">
+      <div class="error">Bezig met laden…</div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  function pad(n){ return n<10?'0'+n:n; }
+  function renderClock(){
+    const now=new Date();
+    document.getElementById('clock').textContent=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
+  renderClock();
+  setInterval(renderClock,60000);
+
+  const params=new URLSearchParams(window.location.search);
+  const city=params.get('city')||''; const country=params.get('country')||''; 
+  const lat=params.get('lat'); const lon=params.get('lon');
+  const tz=params.get('timezone')||'Europe/Amsterdam';
+  const daysParam=6;
+
+  const contentEl=document.getElementById('content');
+  function showError(msg){ contentEl.innerHTML='<div class="error">'+msg+'</div>'; }
+  function fmtDay(dateStr,idx){
+    if(idx===0) return 'Vandaag';
+    if(idx===1) return 'Morgen';
+    return new Date(dateStr+'T12:00:00').toLocaleDateString('nl-NL',{weekday:'long'});
+  }
+  function round(n){return Math.round(n);}
+
+  async function fetchJSON(url){
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok) throw new Error('Netwerkfout '+r.status);
+    return r.json();
+  }
+
+  async function geocodeCity(name,countryCode){
+    const url=`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=nl&format=json${countryCode?'&country='+countryCode:''}`;
+    const j=await fetchJSON(url);
+    if(!j.results) throw new Error('Plaats niet gevonden');
+    return {lat:j.results[0].latitude,lon:j.results[0].longitude};
+  }
+
+  function iconAndDescFromWMO(code){
+    const map=[{codes:[0],key:'☀️',desc:'Onbewolkt'},
+      {codes:[1,2],key:'🌤',desc:'Deels bewolkt'},
+      {codes:[3],key:'☁️',desc:'Bewolkt'},
+      {codes:[45,48],key:'🌫',desc:'Mist'},
+      {codes:[51,53,55,61,63,65,80,81,82],key:'🌧',desc:'Regen'},
+      {codes:[71,73,75,77,85,86],key:'❄️',desc:'Sneeuw'},
+      {codes:[95,96,99],key:'⛈',desc:'Onweer'}];
+    for(const m of map){if(m.codes.includes(code))return m;}
+    return {key:'❓',desc:'Onbekend'};
+  }
+
+  function render(days){
+    contentEl.innerHTML=days.map((d,i)=>`
+      <div class="card">
+        <div class="day-name">${fmtDay(d.date,i)}</div>
+        <div class="icon">${d.iconKey}</div>
+        <div class="temps"><div>${round(d.tmax)}°</div><div class="temp-min">/ ${round(d.tmin)}°</div></div>
+        <div class="desc">${d.desc}</div>
+      </div>`).join('');
+  }
+
+  function pickNext(daily,count){
+    const out=[]; const take=Math.min(count,daily.time.length);
+    for(let i=0;i<take;i++){
+      const meta=iconAndDescFromWMO(daily.weathercode[i]);
+      out.push({date:daily.time[i],iconKey:meta.key,desc:meta.desc,
+        tmax:daily.temperature_2m_max[i],tmin:daily.temperature_2m_min[i]});
+    }
+    return out;
+  }
+
+  async function init(){
+    try{
+      let coords=null;
+      if(lat&&lon) coords={lat:Number(lat),lon:Number(lon)};
+      else if(city) coords=await geocodeCity(city,country);
+      else {showError('Geef ?city=... of lat/lon');return;}
+      const url=`https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=${tz}&forecast_days=${daysParam}`;
+      const data=await fetchJSON(url);
+      render(pickNext(data.daily,daysParam));
+    }catch(e){showError(e.message);}
+  }
+  init();
+})();
+</script>
+</body>
+</html>
